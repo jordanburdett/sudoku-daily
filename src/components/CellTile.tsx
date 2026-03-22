@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from 'react'
 import PencilMarks from './PencilMarks'
 
 interface CellTileProps {
@@ -14,6 +13,7 @@ interface CellTileProps {
 }
 
 export default function CellTile({
+  idx,
   value,
   isGiven,
   isSelected,
@@ -23,18 +23,6 @@ export default function CellTile({
   notes,
   onClick,
 }: CellTileProps) {
-  const prevValue = useRef(value)
-  const [popping, setPopping] = useState(false)
-
-  useEffect(() => {
-    if (value !== 0 && value !== prevValue.current) {
-      setPopping(true)
-      const t = setTimeout(() => setPopping(false), 150)
-      prevValue.current = value
-      return () => clearTimeout(t)
-    }
-    prevValue.current = value
-  }, [value])
 
   let background = '#FFFFFF'
   if (isSelected) {
@@ -79,7 +67,7 @@ export default function CellTile({
       }}
     >
       {value !== 0 ? (
-        <span className={popping ? 'digit-pop' : undefined}>{value}</span>
+        <span key={`${idx}-${value}`} className="digit-pop">{value}</span>
       ) : notes.size > 0 ? (
         <PencilMarks notes={notes} />
       ) : null}
