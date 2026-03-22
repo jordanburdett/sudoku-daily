@@ -9,6 +9,8 @@ interface CellTileProps {
   isSameDigit: boolean
   isConflict: boolean
   notes: Set<number>
+  isWinPulse?: boolean
+  isUndoFrame?: boolean
   onClick: () => void
 }
 
@@ -21,6 +23,8 @@ export default function CellTile({
   isSameDigit,
   isConflict,
   notes,
+  isWinPulse,
+  isUndoFrame,
   onClick,
 }: CellTileProps) {
 
@@ -45,9 +49,27 @@ export default function CellTile({
 
   const fontWeight = isGiven ? 700 : 500
 
+  // Determine digit span class name
+  let spanClassName = 'digit-pop'
+  if (isWinPulse) spanClassName = 'win-pulse'
+  else if (isUndoFrame) spanClassName = 'undo-reveal'
+
+  const row = Math.floor(idx / 9)
+  const col = idx % 9
+  const digit = value !== 0 ? value : null
+
   return (
     <div
+      role="gridcell"
+      tabIndex={0}
+      aria-label={`Row ${row + 1} Col ${col + 1}${digit ? `, digit ${digit}` : ''}`}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }}
       style={{
         width: '100%',
         height: '100%',
@@ -67,7 +89,7 @@ export default function CellTile({
       }}
     >
       {value !== 0 ? (
-        <span key={`${idx}-${value}`} className="digit-pop">{value}</span>
+        <span key={`${idx}-${value}-${isWinPulse ? 'w' : isUndoFrame ? 'u' : 'n'}`} className={spanClassName}>{value}</span>
       ) : notes.size > 0 ? (
         <PencilMarks notes={notes} />
       ) : null}

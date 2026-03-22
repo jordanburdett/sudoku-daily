@@ -9,6 +9,7 @@ interface NumberPadProps {
 const btnBase: React.CSSProperties = {
   width: '44px',
   height: '44px',
+  minHeight: '44px',
   borderRadius: '8px',
   border: '1px solid #C7D2FE',
   background: '#FFFFFF',
@@ -21,6 +22,7 @@ const btnBase: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   transition: 'background 0.15s',
+  touchAction: 'manipulation',
 }
 
 export default function NumberPad({
@@ -41,7 +43,7 @@ export default function NumberPad({
       }}
     >
       {/* Digit buttons */}
-      <div style={{ display: 'flex', gap: '6px' }}>
+      <div className="numpad-digits" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
           <button
             key={d}
@@ -54,7 +56,7 @@ export default function NumberPad({
         ))}
       </div>
       {/* Action buttons */}
-      <div style={{ display: 'flex', gap: '8px' }}>
+      <div className="numpad-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
         <button
           onClick={onNotes}
           aria-pressed={notesMode}

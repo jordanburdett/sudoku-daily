@@ -5,6 +5,8 @@ interface SudokuBoardProps {
   state: GameState
   highlights: { region: Set<number>; sameDigit: Set<number> }
   conflicts: Set<number>
+  winCells: Set<number>
+  undoCell: number | null
   onSelectCell: (idx: number) => void
 }
 
@@ -12,6 +14,8 @@ export default function SudokuBoard({
   state,
   highlights,
   conflicts,
+  winCells,
+  undoCell,
   onSelectCell,
 }: SudokuBoardProps) {
   const cellSize = 'min(9.5vw, 52px)'
@@ -26,6 +30,7 @@ export default function SudokuBoard({
         gridTemplateRows: `repeat(9, ${cellSize})`,
         border: '2px solid #6366F1',
         margin: '12px 0',
+        width: 'min(calc(100vw - 32px), 400px)',
       }}
     >
       {Array.from({ length: 81 }, (_, idx) => {
@@ -36,6 +41,8 @@ export default function SudokuBoard({
         const isInRegion = highlights.region.has(idx)
         const isSameDigit = highlights.sameDigit.has(idx)
         const isConflict = conflicts.has(idx)
+        const isWinPulse = winCells.has(idx)
+        const isUndoFrame = undoCell === idx
 
         // Build cell borders
         const borderTop = row % 3 === 0 && row !== 0 ? '2px solid #C7D2FE' : '1px solid #E2E8F0'
@@ -46,8 +53,6 @@ export default function SudokuBoard({
         return (
           <div
             key={idx}
-            role="gridcell"
-            aria-label={`Row ${row + 1}, column ${col + 1}${state.board[idx] ? `, value ${state.board[idx]}` : ', empty'}`}
             style={{
               borderTop,
               borderLeft,
@@ -65,6 +70,8 @@ export default function SudokuBoard({
               isSameDigit={isSameDigit && !isSelected && !isInRegion}
               isConflict={isConflict}
               notes={state.notes[idx]}
+              isWinPulse={isWinPulse}
+              isUndoFrame={isUndoFrame}
               onClick={() => onSelectCell(idx)}
             />
           </div>

@@ -15,6 +15,7 @@ import HUD from './components/HUD'
 import SudokuBoard from './components/SudokuBoard'
 import NumberPad from './components/NumberPad'
 import ResultCard from './components/ResultCard'
+import { AudioEngine } from './utils/AudioEngine'
 
 function App() {
   const engineRef = useRef<GameEngine | null>(null)
@@ -22,10 +23,19 @@ function App() {
   const engine = engineRef.current
   const [state, setState] = useState(() => engine.getState())
 
+  // AudioEngine stored in useState (not useRef) per task spec
+  const [audio] = useState(() => new AudioEngine())
+
   const [mode, setMode] = useState<'daily' | 'freeplay'>('daily')
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.MEDIUM)
   const [showResult, setShowResult] = useState(false)
   const [streak, setStreak] = useState<StreakState>(() => loadStreak())
+
+  // Win sequence animation state
+  const [winCells, setWinCells] = useState<Set<number>>(new Set())
+
+  // Undo animation state: cell index to animate, or null
+  const [undoCell, setUndoCell] = useState<number | null>(null)
 
   // Daily puzzle ref — stored so we can use it for emojiCard and reveal
   const dailySolutionRef = useRef<number[]>([])
@@ -193,6 +203,28 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.gameStatus, mode])
 
+  // Win sequence animation — fires when gameStatus transitions to WON
+  useEffect(() => {
+    if (state.gameStatus !== GameStatus.WON) return
+
+    audio.playWinChime()
+    const timeouts: ReturnType<typeof setTimeout>[] = []
+    for (let i = 0; i < 81; i++) {
+      const t = setTimeout(() => {
+        setWinCells(prev => new Set([...prev, i]))
+      }, i * 8)
+      timeouts.push(t)
+    }
+    // Clear win cells after animation completes (result card will show)
+    const finalT = setTimeout(() => {
+      setWinCells(new Set())
+    }, 81 * 8 + 200)
+    timeouts.push(finalT)
+    return () => timeouts.forEach(clearTimeout)
+  // audio is stable (from useState), safe to omit
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.gameStatus])
+
   // Keyboard handler
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -215,22 +247,50 @@ function App() {
               notesSnapshot: null,
             })
           }
+          // Check conflicts before and after for buzz
+          const beforeConflicts = engineRef.current!.getConflicts().size
           dispatchDaily(() => engineRef.current!.enterDigit(parseInt(e.key)))
+          const afterConflicts = engineRef.current!.getConflicts().size
+          if (engState.notesMode) {
+            audio.playNotesBlip()
+          } else {
+            audio.playDigitTick()
+            if (afterConflicts > beforeConflicts) audio.playConflictBuzz()
+          }
         } else {
+          const beforeConflicts = engineRef.current!.getConflicts().size
           dispatch(() => engineRef.current!.enterDigit(parseInt(e.key)))
+          const afterConflicts = engineRef.current!.getConflicts().size
+          if (engState.notesMode) {
+            audio.playNotesBlip()
+          } else {
+            audio.playDigitTick()
+            if (afterConflicts > beforeConflicts) audio.playConflictBuzz()
+          }
         }
       } else if (e.key === 'n' || e.key === 'N') {
         dispatch(() => engineRef.current!.toggleNotesMode())
+        audio.playNotesBlip()
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
+        const sel = engState.selectedCell
+        const hadContent = sel !== null && (engState.board[sel] !== 0 || engState.notes[sel].size > 0)
         if (mode === 'daily') {
           dispatchDaily(() => engineRef.current!.eraseCell())
         } else {
           dispatch(() => engineRef.current!.eraseCell())
         }
+        if (hadContent) audio.playEraseSwipe()
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
+        const sel = engState.selectedCell
         dispatch(() => engineRef.current!.undo())
+        audio.playUndoPop()
+        // Trigger undo animation on the selected cell
+        if (sel !== null) {
+          setUndoCell(sel)
+          setTimeout(() => setUndoCell(null), 200)
+        }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         const cur = engState.selectedCell
@@ -247,11 +307,13 @@ function App() {
         e.preventDefault()
         const cur = engState.selectedCell
         if (cur !== null && cur % 9 < 8) dispatch(() => engineRef.current!.selectCell(cur + 1))
+      } else if (e.key === 'Escape') {
+        dispatch(() => engineRef.current!.selectCell(-1))
       }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [dispatch, dispatchDaily, mode])
+  }, [dispatch, dispatchDaily, mode, audio])
 
   // Timer
   useEffect(() => {
@@ -432,6 +494,8 @@ function App() {
         state={state}
         highlights={highlights}
         conflicts={conflicts}
+        winCells={winCells}
+        undoCell={undoCell}
         onSelectCell={idx => dispatch(() => engineRef.current!.selectCell(idx))}
       />
       <NumberPad
@@ -453,20 +517,54 @@ function App() {
                 notesSnapshot: null,
               })
             }
+            const engState = engineRef.current!.getState()
+            const beforeConflicts = engineRef.current!.getConflicts().size
             dispatchDaily(() => engineRef.current!.enterDigit(d))
+            const afterConflicts = engineRef.current!.getConflicts().size
+            if (engState.notesMode) {
+              audio.playNotesBlip()
+            } else {
+              audio.playDigitTick()
+              if (afterConflicts > beforeConflicts) audio.playConflictBuzz()
+            }
           } else {
+            const engState = engineRef.current!.getState()
+            const beforeConflicts = engineRef.current!.getConflicts().size
             dispatch(() => engineRef.current!.enterDigit(d))
+            const afterConflicts = engineRef.current!.getConflicts().size
+            if (engState.notesMode) {
+              audio.playNotesBlip()
+            } else {
+              audio.playDigitTick()
+              if (afterConflicts > beforeConflicts) audio.playConflictBuzz()
+            }
           }
         }}
-        onNotes={() => dispatch(() => engineRef.current!.toggleNotesMode())}
+        onNotes={() => {
+          dispatch(() => engineRef.current!.toggleNotesMode())
+          audio.playNotesBlip()
+        }}
         onErase={() => {
+          const engState = engineRef.current!.getState()
+          const sel = engState.selectedCell
+          const hadContent = sel !== null && (engState.board[sel] !== 0 || engState.notes[sel].size > 0)
           if (mode === 'daily') {
             dispatchDaily(() => engineRef.current!.eraseCell())
           } else {
             dispatch(() => engineRef.current!.eraseCell())
           }
+          if (hadContent) audio.playEraseSwipe()
         }}
-        onUndo={() => dispatch(() => engineRef.current!.undo())}
+        onUndo={() => {
+          const engState = engineRef.current!.getState()
+          const sel = engState.selectedCell
+          dispatch(() => engineRef.current!.undo())
+          audio.playUndoPop()
+          if (sel !== null) {
+            setUndoCell(sel)
+            setTimeout(() => setUndoCell(null), 200)
+          }
+        }}
       />
 
       {/* Result card overlay */}

@@ -24,8 +24,50 @@ body {
   animation: digitPop 150ms ease-out;
 }
 
+@keyframes winPulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.2); color: #6366F1; }
+  100% { transform: scale(1); }
+}
+
+.win-pulse {
+  animation: winPulse 200ms ease-out;
+}
+
+@keyframes undoReveal {
+  0% { opacity: 1; transform: scale(1); }
+  40% { opacity: 0.3; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.undo-reveal {
+  animation: undoReveal 160ms ease-out;
+}
+
+/* Conflict transition */
+.cell-conflict {
+  transition: background-color 120ms ease;
+}
+
+/* Mobile number pad */
+@media (max-width: 380px) {
+  .numpad-digits {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .numpad-digits button {
+    min-height: 44px;
+    flex: 0 0 calc(20% - 4px);
+  }
+  .numpad-actions button {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .digit-pop {
+  .digit-pop,
+  .win-pulse,
+  .undo-reveal {
     animation: none;
     transition: none;
   }

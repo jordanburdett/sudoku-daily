@@ -90,7 +90,7 @@ export default class GameEngine {
   }
 
   selectCell(idx: number): void {
-    this.selectedCell = idx
+    this.selectedCell = idx >= 0 && idx < 81 ? idx : null
   }
 
   enterDigit(digit: number): void {
@@ -212,7 +212,7 @@ export default class GameEngine {
 
   reveal(solution: number[]): void {
     for (let i = 0; i < 81; i++) {
-      if (!this.givens[i] && this.board[i] === 0) {
+      if (!this.givens[i]) {
         this.board[i] = solution[i]
       }
     }
