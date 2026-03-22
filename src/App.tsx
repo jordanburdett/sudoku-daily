@@ -1,9 +1,20 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
-import GameEngine, { Difficulty } from './game/GameEngine'
+import GameEngine, { Difficulty, GameStatus } from './game/GameEngine'
 import { generatePuzzle } from './game/PuzzleGenerator'
+import {
+  getDailyPuzzle,
+  getChallengeNumber,
+  loadDailyState,
+  saveDailyState,
+  loadStreak,
+  updateStreak,
+  buildEmojiCard,
+} from './game/DailyChallenge'
+import type { StreakState } from './game/DailyChallenge'
 import HUD from './components/HUD'
 import SudokuBoard from './components/SudokuBoard'
 import NumberPad from './components/NumberPad'
+import ResultCard from './components/ResultCard'
 
 function App() {
   const engineRef = useRef<GameEngine | null>(null)
@@ -11,52 +22,236 @@ function App() {
   const engine = engineRef.current
   const [state, setState] = useState(() => engine.getState())
 
+  const [mode, setMode] = useState<'daily' | 'freeplay'>('daily')
+  const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.MEDIUM)
+  const [showResult, setShowResult] = useState(false)
+  const [streak, setStreak] = useState<StreakState>(() => loadStreak())
+
+  // Daily puzzle ref — stored so we can use it for emojiCard and reveal
+  const dailySolutionRef = useRef<number[]>([])
+  const dailyGivensRef = useRef<boolean[]>([])
+
   const dispatch = useCallback((fn: () => void) => {
     fn()
     setState(engineRef.current!.getState())
   }, [])
 
-  // Generate initial Free Play puzzle on mount
-  useEffect(() => {
-    const { solution, givens } = generatePuzzle(Difficulty.MEDIUM, Math.random)
-    dispatch(() => engineRef.current!.loadPuzzle(solution, givens, Difficulty.MEDIUM))
+  // Save daily board snapshot after dispatch in daily mode
+  const dispatchDaily = useCallback((fn: () => void) => {
+    fn()
+    const newState = engineRef.current!.getState()
+    setState(newState)
+    // Save board snapshot
+    const existing = loadDailyState()
+    if (existing && existing.started && !existing.completed) {
+      saveDailyState({
+        ...existing,
+        boardSnapshot: [...newState.board],
+        notesSnapshot: newState.notes.map(s => Array.from(s)),
+      })
+    }
+  }, [])
+
+  // Initialize daily puzzle
+  const initDaily = useCallback(() => {
+    const { solution, givens } = getDailyPuzzle()
+    dailySolutionRef.current = solution
+    dailyGivensRef.current = givens
+
+    const saved = loadDailyState()
+
+    if (saved && saved.completed) {
+      // Already completed today — load the puzzle and show result
+      dispatch(() => engineRef.current!.loadPuzzle(solution, givens, Difficulty.MEDIUM))
+      if (saved.boardSnapshot) {
+        // Restore board state
+        const eng = engineRef.current!
+        const boardSnap = saved.boardSnapshot
+        const notesSnap = saved.notesSnapshot ?? null
+        // Load the puzzle first (already done above), then overwrite board
+        dispatch(() => {
+          eng.loadPuzzle(solution, givens, Difficulty.MEDIUM)
+          // Manually restore via selectCell+enterDigit is too complex;
+          // we use a restore method via the engine's internal state
+          // Instead we'll just show the completed state
+          const st = eng.getState()
+          // Apply snapshot by entering digits on empty cells
+          for (let i = 0; i < 81; i++) {
+            if (!st.givens[i] && boardSnap[i] !== 0) {
+              eng.selectCell(i)
+              eng.enterDigit(boardSnap[i])
+            }
+          }
+          if (notesSnap) {
+            // Can't easily restore notes without direct access, skip for completed state
+          }
+        })
+      }
+      setShowResult(true)
+    } else if (saved && saved.started && !saved.completed) {
+      // In progress — restore board
+      const boardSnap = saved.boardSnapshot
+      const notesSnap = saved.notesSnapshot
+      dispatch(() => {
+        const eng = engineRef.current!
+        eng.loadPuzzle(solution, givens, Difficulty.MEDIUM)
+        if (boardSnap) {
+          const st = eng.getState()
+          for (let i = 0; i < 81; i++) {
+            if (!st.givens[i] && boardSnap[i] !== 0) {
+              eng.selectCell(i)
+              eng.enterDigit(boardSnap[i])
+            }
+          }
+        }
+        if (notesSnap) {
+          // Restore notes via notes mode
+          const eng2 = engineRef.current!
+          eng2.toggleNotesMode()
+          for (let i = 0; i < 81; i++) {
+            if (notesSnap[i] && notesSnap[i].length > 0) {
+              eng2.selectCell(i)
+              for (const n of notesSnap[i]) {
+                eng2.enterDigit(n)
+              }
+            }
+          }
+          eng2.toggleNotesMode()
+        }
+      })
+    } else {
+      // Fresh start — load puzzle but don't mark started yet
+      dispatch(() => engineRef.current!.loadPuzzle(solution, givens, Difficulty.MEDIUM))
+    }
   }, [dispatch])
+
+  // Initialize free play puzzle
+  const initFreePlay = useCallback((diff: Difficulty) => {
+    const { solution, givens } = generatePuzzle(diff, Math.random)
+    dispatch(() => engineRef.current!.loadPuzzle(solution, givens, diff))
+  }, [dispatch])
+
+  // Mount: load daily by default
+  useEffect(() => {
+    initDaily()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Switch to daily
+  const switchToDaily = useCallback(() => {
+    setMode('daily')
+    setShowResult(false)
+    initDaily()
+  }, [initDaily])
+
+  // Switch to free play
+  const switchToFreePlay = useCallback(() => {
+    setMode('freeplay')
+    setShowResult(false)
+    initFreePlay(difficulty)
+  }, [initFreePlay, difficulty])
+
+  // Start free play with a specific difficulty
+  const startFreePlay = useCallback((diff: Difficulty) => {
+    setDifficulty(diff)
+    setMode('freeplay')
+    setShowResult(false)
+    initFreePlay(diff)
+  }, [initFreePlay])
+
+  // Win detection for daily mode
+  useEffect(() => {
+    if (mode !== 'daily') return
+    if (state.gameStatus !== GameStatus.WON) return
+
+    const existingSaved = loadDailyState()
+    if (existingSaved?.completed) return // already processed
+
+    const emojiCard = buildEmojiCard(
+      state.board,
+      dailySolutionRef.current,
+      dailyGivensRef.current,
+    )
+    const newStreak = updateStreak(false)
+    setStreak(newStreak)
+
+    saveDailyState({
+      started: true,
+      completed: true,
+      won: true,
+      usedReveal: false,
+      timeMs: state.elapsedMs,
+      emojiCard,
+      challengeNumber: getChallengeNumber(),
+      boardSnapshot: [...state.board],
+      notesSnapshot: state.notes.map(s => Array.from(s)),
+    })
+
+    // Small delay so win animation can play
+    const timer = setTimeout(() => setShowResult(true), 600)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.gameStatus, mode])
 
   // Keyboard handler
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      const engState = engineRef.current!.getState()
       if (e.key >= '1' && e.key <= '9') {
         e.preventDefault()
-        dispatch(() => engineRef.current!.enterDigit(parseInt(e.key)))
+        if (mode === 'daily') {
+          // One-attempt sentinel
+          const existing = loadDailyState()
+          if (!existing || !existing.started) {
+            saveDailyState({
+              started: true,
+              completed: false,
+              won: false,
+              usedReveal: false,
+              timeMs: null,
+              emojiCard: null,
+              challengeNumber: getChallengeNumber(),
+              boardSnapshot: null,
+              notesSnapshot: null,
+            })
+          }
+          dispatchDaily(() => engineRef.current!.enterDigit(parseInt(e.key)))
+        } else {
+          dispatch(() => engineRef.current!.enterDigit(parseInt(e.key)))
+        }
       } else if (e.key === 'n' || e.key === 'N') {
         dispatch(() => engineRef.current!.toggleNotesMode())
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        dispatch(() => engineRef.current!.eraseCell())
+        if (mode === 'daily') {
+          dispatchDaily(() => engineRef.current!.eraseCell())
+        } else {
+          dispatch(() => engineRef.current!.eraseCell())
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
         dispatch(() => engineRef.current!.undo())
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
-        const cur = engineRef.current!.getState().selectedCell
+        const cur = engState.selectedCell
         if (cur !== null && cur >= 9) dispatch(() => engineRef.current!.selectCell(cur - 9))
       } else if (e.key === 'ArrowDown') {
         e.preventDefault()
-        const cur = engineRef.current!.getState().selectedCell
+        const cur = engState.selectedCell
         if (cur !== null && cur <= 71) dispatch(() => engineRef.current!.selectCell(cur + 9))
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        const cur = engineRef.current!.getState().selectedCell
+        const cur = engState.selectedCell
         if (cur !== null && cur % 9 > 0) dispatch(() => engineRef.current!.selectCell(cur - 1))
       } else if (e.key === 'ArrowRight') {
         e.preventDefault()
-        const cur = engineRef.current!.getState().selectedCell
+        const cur = engState.selectedCell
         if (cur !== null && cur % 9 < 8) dispatch(() => engineRef.current!.selectCell(cur + 1))
       }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [dispatch])
+  }, [dispatch, dispatchDaily, mode])
 
   // Timer
   useEffect(() => {
@@ -68,6 +263,44 @@ function App() {
     }, 1000)
     return () => clearInterval(interval)
   }, [])
+
+  // Reveal handler (daily mode only)
+  const handleReveal = useCallback(() => {
+    const confirmed = window.confirm(
+      'Are you sure you want to reveal the solution? This will end your daily challenge.'
+    )
+    if (!confirmed) return
+
+    const solution = dailySolutionRef.current
+    const givens = dailyGivensRef.current
+
+    dispatch(() => engineRef.current!.reveal(solution))
+    const newState = engineRef.current!.getState()
+
+    const emojiCard = buildEmojiCard(newState.board, solution, givens)
+
+    saveDailyState({
+      started: true,
+      completed: true,
+      won: false,
+      usedReveal: true,
+      timeMs: newState.elapsedMs,
+      emojiCard,
+      challengeNumber: getChallengeNumber(),
+      boardSnapshot: [...newState.board],
+      notesSnapshot: newState.notes.map(s => Array.from(s)),
+    })
+
+    setShowResult(true)
+  }, [dispatch])
+
+  // Handle new game from result card
+  const handleNewGameFromResult = useCallback(() => {
+    setShowResult(false)
+    setMode('freeplay')
+    initFreePlay(Difficulty.MEDIUM)
+    setDifficulty(Difficulty.MEDIUM)
+  }, [initFreePlay])
 
   // Compute highlights
   const highlights = useMemo(
@@ -83,6 +316,20 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.board]
   )
+
+  // Derive result card props from saved daily state
+  const savedDaily = showResult ? loadDailyState() : null
+
+  const buttonBase: React.CSSProperties = {
+    padding: '8px 18px',
+    borderRadius: '8px',
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    border: 'none',
+    transition: 'background 150ms, color 150ms',
+  }
 
   return (
     <div
@@ -104,13 +351,83 @@ function App() {
       >
         Sudoku
       </h1>
+
+      {/* Mode selector tabs */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+        <button
+          onClick={switchToDaily}
+          style={{
+            ...buttonBase,
+            background: mode === 'daily' ? '#4F46E5' : '#EEF2FF',
+            color: mode === 'daily' ? 'white' : '#312E81',
+          }}
+        >
+          {`Daily #${getChallengeNumber()}`}
+        </button>
+        <button
+          onClick={switchToFreePlay}
+          style={{
+            ...buttonBase,
+            background: mode === 'freeplay' ? '#4F46E5' : '#EEF2FF',
+            color: mode === 'freeplay' ? 'white' : '#312E81',
+          }}
+        >
+          Free Play
+        </button>
+      </div>
+
+      {/* Free Play difficulty selector */}
+      {mode === 'freeplay' && (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+          {(['EASY', 'MEDIUM', 'HARD', 'EXPERT'] as Difficulty[]).map(d => (
+            <button
+              key={d}
+              onClick={() => startFreePlay(d)}
+              style={{
+                ...buttonBase,
+                padding: '5px 12px',
+                fontSize: '0.8rem',
+                background: difficulty === d ? '#4F46E5' : '#EEF2FF',
+                color: difficulty === d ? 'white' : '#312E81',
+              }}
+            >
+              {d[0] + d.slice(1).toLowerCase()}
+            </button>
+          ))}
+        </div>
+      )}
+
       <HUD
         state={state}
         onNewGame={() => {
-          const { solution, givens } = generatePuzzle(Difficulty.MEDIUM, Math.random)
-          dispatch(() => engineRef.current!.loadPuzzle(solution, givens, Difficulty.MEDIUM))
+          if (mode === 'daily') {
+            switchToFreePlay()
+          } else {
+            const { solution, givens } = generatePuzzle(difficulty, Math.random)
+            dispatch(() => engineRef.current!.loadPuzzle(solution, givens, difficulty))
+          }
         }}
       />
+
+      {/* Reveal button — daily only, only while playing */}
+      {mode === 'daily' && state.gameStatus === GameStatus.PLAYING && (
+        <div style={{ marginBottom: '6px' }}>
+          <button
+            onClick={handleReveal}
+            style={{
+              ...buttonBase,
+              padding: '5px 14px',
+              fontSize: '0.82rem',
+              background: '#EEF2FF',
+              color: '#6366F1',
+              border: '1px solid #6366F1',
+            }}
+          >
+            Reveal
+          </button>
+        </div>
+      )}
+
       <SudokuBoard
         state={state}
         highlights={highlights}
@@ -119,11 +436,52 @@ function App() {
       />
       <NumberPad
         notesMode={state.notesMode}
-        onDigit={d => dispatch(() => engineRef.current!.enterDigit(d))}
+        onDigit={d => {
+          if (mode === 'daily') {
+            // One-attempt sentinel
+            const existing = loadDailyState()
+            if (!existing || !existing.started) {
+              saveDailyState({
+                started: true,
+                completed: false,
+                won: false,
+                usedReveal: false,
+                timeMs: null,
+                emojiCard: null,
+                challengeNumber: getChallengeNumber(),
+                boardSnapshot: null,
+                notesSnapshot: null,
+              })
+            }
+            dispatchDaily(() => engineRef.current!.enterDigit(d))
+          } else {
+            dispatch(() => engineRef.current!.enterDigit(d))
+          }
+        }}
         onNotes={() => dispatch(() => engineRef.current!.toggleNotesMode())}
-        onErase={() => dispatch(() => engineRef.current!.eraseCell())}
+        onErase={() => {
+          if (mode === 'daily') {
+            dispatchDaily(() => engineRef.current!.eraseCell())
+          } else {
+            dispatch(() => engineRef.current!.eraseCell())
+          }
+        }}
         onUndo={() => dispatch(() => engineRef.current!.undo())}
       />
+
+      {/* Result card overlay */}
+      {showResult && savedDaily && (
+        <ResultCard
+          challengeNumber={savedDaily.challengeNumber}
+          emojiCard={savedDaily.emojiCard ?? '⬛⬛⬛⬛⬛⬛⬛⬛⬛'}
+          timeMs={savedDaily.timeMs}
+          won={savedDaily.won}
+          usedReveal={savedDaily.usedReveal}
+          streak={streak}
+          onNewGame={handleNewGameFromResult}
+          onClose={() => setShowResult(false)}
+        />
+      )}
     </div>
   )
 }

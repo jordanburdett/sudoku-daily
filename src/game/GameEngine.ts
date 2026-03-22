@@ -210,6 +210,15 @@ export default class GameEngine {
     return conflicts
   }
 
+  reveal(solution: number[]): void {
+    for (let i = 0; i < 81; i++) {
+      if (!this.givens[i] && this.board[i] === 0) {
+        this.board[i] = solution[i]
+      }
+    }
+    this.gameStatus = GameStatus.REVEALED
+  }
+
   getHighlights(idx: number): { region: Set<number>; sameDigit: Set<number> } {
     const region = new Set<number>()
     for (const c of this.getRow(idx)) region.add(c)
