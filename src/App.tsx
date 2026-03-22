@@ -197,8 +197,8 @@ function App() {
       notesSnapshot: state.notes.map(s => Array.from(s)),
     })
 
-    // Small delay so win animation can play
-    const timer = setTimeout(() => setShowResult(true), 600)
+    // Delay matches win animation duration: 81 cells × 8ms + 200ms buffer = 848ms
+    const timer = setTimeout(() => setShowResult(true), 81 * 8 + 200)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.gameStatus, mode])
@@ -224,6 +224,15 @@ function App() {
   // audio is stable (from useState), safe to omit
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.gameStatus])
+
+  // Free play win detection — show result card after animation completes
+  useEffect(() => {
+    if (mode !== 'freeplay') return
+    if (state.gameStatus !== GameStatus.WON) return
+
+    const timer = setTimeout(() => setShowResult(true), 81 * 8 + 200)
+    return () => clearTimeout(timer)
+  }, [state.gameStatus, mode])
 
   // Keyboard handler
   useEffect(() => {
@@ -568,14 +577,25 @@ function App() {
       />
 
       {/* Result card overlay */}
-      {showResult && savedDaily && (
+      {showResult && mode === 'daily' && savedDaily && (
         <ResultCard
+          isDaily
           challengeNumber={savedDaily.challengeNumber}
           emojiCard={savedDaily.emojiCard ?? '⬛⬛⬛⬛⬛⬛⬛⬛⬛'}
           timeMs={savedDaily.timeMs}
           won={savedDaily.won}
           usedReveal={savedDaily.usedReveal}
           streak={streak}
+          onNewGame={handleNewGameFromResult}
+          onClose={() => setShowResult(false)}
+        />
+      )}
+      {showResult && mode === 'freeplay' && (
+        <ResultCard
+          isDaily={false}
+          timeMs={state.elapsedMs}
+          won
+          usedReveal={false}
           onNewGame={handleNewGameFromResult}
           onClose={() => setShowResult(false)}
         />

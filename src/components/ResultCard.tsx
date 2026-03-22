@@ -3,17 +3,19 @@ import type { StreakState } from '../game/DailyChallenge'
 import { formatTime } from '../game/DailyChallenge'
 
 interface ResultCardProps {
-  challengeNumber: number
-  emojiCard: string  // 9-char string of emoji
+  isDaily: boolean
+  challengeNumber?: number
+  emojiCard?: string  // 9-char string of emoji
   timeMs: number | null
   won: boolean
   usedReveal: boolean
-  streak: StreakState
+  streak?: StreakState
   onNewGame: () => void
   onClose: () => void
 }
 
 export default function ResultCard({
+  isDaily,
   challengeNumber,
   emojiCard,
   timeMs,
@@ -25,8 +27,8 @@ export default function ResultCard({
 }: ResultCardProps) {
   const [copied, setCopied] = useState(false)
 
-  const title = `Sudoku Daily #${challengeNumber}`
-  const emojiRow = [...emojiCard].join('')
+  const title = isDaily ? `Sudoku Daily #${challengeNumber}` : 'Puzzle Solved! 🎉'
+  const emojiRow = emojiCard ? [...emojiCard].join('') : ''
 
   let timeLineShare = ''
   let timeLineDisplay = ''
@@ -67,7 +69,7 @@ export default function ResultCard({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Daily challenge result"
+      aria-label={isDaily ? 'Daily challenge result' : 'Free play result'}
       style={{
         position: 'fixed',
         inset: 0,
@@ -128,33 +130,50 @@ export default function ResultCard({
           {title}
         </h2>
 
-        {/* Emoji row */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '4px',
-            marginBottom: '16px',
-            flexWrap: 'nowrap',
-          }}
-          aria-label={`Result: ${emojiRow}`}
-        >
-          {[...emojiCard].map((emoji, i) => (
-            <span
-              key={i}
-              style={{
-                fontSize: '1.5rem',
-                width: '32px',
-                height: '32px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {emoji}
-            </span>
-          ))}
-        </div>
+        {/* Daily-only: emoji row */}
+        {isDaily && emojiCard && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '4px',
+              marginBottom: '16px',
+              flexWrap: 'nowrap',
+            }}
+            aria-label={`Result: ${emojiRow}`}
+          >
+            {[...emojiCard].map((emoji, i) => (
+              <span
+                key={i}
+                style={{
+                  fontSize: '1.5rem',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {emoji}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Free play label */}
+        {!isDaily && (
+          <p
+            style={{
+              textAlign: 'center',
+              fontWeight: 600,
+              fontSize: '1rem',
+              margin: '0 0 12px',
+              color: '#6366F1',
+            }}
+          >
+            Free Play — Puzzle Complete!
+          </p>
+        )}
 
         {/* Time / result line */}
         <p
@@ -169,8 +188,8 @@ export default function ResultCard({
           {timeLineDisplay}
         </p>
 
-        {/* Streak */}
-        {streak.current > 0 && (
+        {/* Streak (daily only) */}
+        {isDaily && streak && streak.current > 0 && (
           <p
             style={{
               textAlign: 'center',
@@ -192,23 +211,26 @@ export default function ResultCard({
             gap: '8px',
           }}
         >
-          <button
-            onClick={handleShare}
-            style={{
-              padding: '10px 16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: copied ? '#10B981' : '#4F46E5',
-              color: '#FFFFFF',
-              fontSize: '0.95rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: 'Inter, system-ui, sans-serif',
-              transition: 'background 150ms',
-            }}
-          >
-            {copied ? 'Copied!' : 'Share'}
-          </button>
+          {/* Share button: daily only */}
+          {isDaily && (
+            <button
+              onClick={handleShare}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: copied ? '#10B981' : '#4F46E5',
+                color: '#FFFFFF',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'Inter, system-ui, sans-serif',
+                transition: 'background 150ms',
+              }}
+            >
+              {copied ? 'Copied!' : 'Share'}
+            </button>
+          )}
 
           <button
             onClick={onNewGame}
@@ -224,7 +246,7 @@ export default function ResultCard({
               fontFamily: 'Inter, system-ui, sans-serif',
             }}
           >
-            New Game (Free Play)
+            New Game
           </button>
         </div>
       </div>
